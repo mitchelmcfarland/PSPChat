@@ -1,3 +1,5 @@
-# network_project in c for practice
+# Peer to Peer Chat for the PSP
 
-eventually i am going to port this to the psp in the other repo
+WIP
+
+no, this is not vibecoded. any bad code is my own
