@@ -153,7 +153,7 @@ int net_thread(SceSize args, void *argp)
 			break;
 		}
 
-		if (connect_to_apctl(1))
+		if (connect_to_apctl(3))
 		{
 			// connected, get my IPADDR and run test
 			union SceNetApctlInfo info;

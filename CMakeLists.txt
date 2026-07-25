@@ -4,11 +4,10 @@ project(pspchat)
 
 add_executable(${PROJECT_NAME} main.c)
 
-target_link_libraries(${PROJECT_NAME} PRIVATE
+target_link_libraries(${PROJECT_NAME} PRIVATE 
     pspdebug
     pspdisplay
     pspge
-    pspsdk
     pspnet
     pspnet_apctl
 )
