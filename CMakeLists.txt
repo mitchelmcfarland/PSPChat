@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.11)
 
-project(pspchat)
+project(PSPChat)
 
 add_executable(${PROJECT_NAME} main.c)
 
@@ -10,6 +10,8 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     pspge
     pspnet
     pspnet_apctl
+    pspgu
+    pspgum
 )
 
 # Create an EBOOT.PBP file
