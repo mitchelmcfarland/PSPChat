@@ -17,11 +17,14 @@
 #include <pspnet_inet.h>
 #include <pspnet.h>
 #include <math.h>
+#include <pspctrl.h>
 
 #define printf pspDebugScreenPrintf
 
 #define MODULE_NAME "PSPChat"
 #define MAX_MESSAGE_LEN 4096
+#define PORT 8080
+#define SERVER_IP "192.168.1.41"
 
 // PSP_MODULE_INFO is required
 PSP_MODULE_INFO(MODULE_NAME, 0, 1, 0); //name, attributes, major version, minor version
@@ -32,13 +35,46 @@ PSP_HEAP_SIZE_KB(-2048);
 PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER); //sets your thread as a user thread
 PSP_MAIN_THREAD_STACK_SIZE_KB(1024);
 
+
+int client_fd;
+
+char recv_buf[MAX_MESSAGE_LEN];
+
+int recv_thread(SceSize args, void *argp) { //thread entries have to be defined like this
+    while (1) {
+        int conn;
+        //char *send_buf_status;
+
+        //printf("> ");
+
+        conn = recv(client_fd, recv_buf, MAX_MESSAGE_LEN - 1, 0);
+
+
+        if (conn == 0) { 
+            printf("Lost connection to the host.\n");
+            return -1;
+        }
+
+        recv_buf[conn] = '\0'; //recv doesnt null terminate, so terminate at the number of bytes you received
+
+        printf("%s", recv_buf);
+
+    }
+
+    close(client_fd);
+
+    sceKernelExitDeleteThread(0);
+
+    return 0;
+}
+
+//decided on multithreading!
 // cant use either poll or select for taking inputs multiplexed, have to look into either multithreading or non blocking in the main graphics rendering loop
 //taken from my prototype code, no poll() for now as I think I have to switch to select()
 static void connect_to_client() {
-    int client_fd;
+    SceUID thid;
     struct sockaddr_in my_addr;
     int status;
-    char recv_buf[MAX_MESSAGE_LEN];
     //char send_buf[MAX_MESSAGE_LEN];
     
     client_fd = socket(PF_INET, SOCK_STREAM, 0);
@@ -50,8 +86,8 @@ static void connect_to_client() {
     }
 
     my_addr.sin_family = AF_INET;
-    my_addr.sin_port = htons(8080);
-    my_addr.sin_addr.s_addr = inet_addr("192.168.1.40");
+    my_addr.sin_port = htons(PORT);
+    my_addr.sin_addr.s_addr = inet_addr(SERVER_IP);
     memset(my_addr.sin_zero, '\0', sizeof my_addr.sin_zero);
 
     status = connect(client_fd, (struct sockaddr *)&my_addr, sizeof my_addr);
@@ -64,26 +100,75 @@ static void connect_to_client() {
 
     printf("Connection established!\nYou are now chatting.\n");
 
-    while (1) {
-        int conn;
-        //char *send_buf_status;
+    thid = sceKernelCreateThread("recv_thread", recv_thread, 0x15, 256 * 1024, PSP_THREAD_ATTR_USER, NULL); /*name, 
+                                                                                                                thread function to actually run, 
+                                                                                                                init priority (example says 0x11 is default, but using 0x15 so it is lower priority than other things),
+                                                                                                                stack size (example says 256kb is regular default, probably oversized for this but its fine for now),
+                                                                                                                thread atrribute, this means user thread,
+                                                                                                                options, no options*/
 
-        //printf("> ");
-
-        conn = recv(client_fd, recv_buf, MAX_MESSAGE_LEN - 1, 0);
-
-        if (conn < 0) { 
-            printf("Lost connection to the host.\n");
-            break;
-        }
-
-        recv_buf[conn] = '\0'; //recv doesnt null terminate, so terminate at the number of bytes you received
-
-        printf("%s", recv_buf);
-
+    if (thid < 0) {
+        printf("Error, couldn't create thread.\n");
+        sceKernelSleepThread();
     }
 
-    close(client_fd);
+    sceKernelStartThread(thid, 0, NULL);    //thread id from create thread, length of arguments in bytes, arguments. just using a global variable instead for the file descriptor lol
+
+    SceCtrlData pad;
+
+    sceCtrlSetSamplingCycle(0);
+    sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
+
+    while (1) {  //taken from controller input sample code, made it so (for now) the circle button guarantees a clean exit
+
+        //pspDebugScreenSetXY(0, 2);
+        sceCtrlReadBufferPositive(&pad, 1);
+
+        //printf("Analog X = %3d, ", pad.Lx);
+        //printf("Analog Y = %3d \n", pad.Ly);
+
+        if (pad.Buttons != 0)
+        {
+            if (pad.Buttons & PSP_CTRL_CIRCLE)
+            {
+                printf("Circle pressed! Exiting. \n");
+                sceKernelTerminateDeleteThread(thid);
+                break;
+            }
+            if (pad.Buttons & PSP_CTRL_SQUARE)
+            {
+                printf("Square pressed! \n");
+            }
+            if (pad.Buttons & PSP_CTRL_TRIANGLE)
+            {
+                printf("Triangle pressed! \n");
+            }
+            
+            if (pad.Buttons & PSP_CTRL_CROSS)
+            {
+                printf("Cross pressed! \n");
+            }
+
+            if (pad.Buttons & PSP_CTRL_UP)
+            {
+                printf("Up direction pad pressed! \n");
+            }
+            if (pad.Buttons & PSP_CTRL_DOWN)
+            {
+                printf("Down direction pad pressed! \n");
+            }
+            if (pad.Buttons & PSP_CTRL_LEFT)
+            {
+                printf("Left direction pad pressed! \n");
+            }
+            if (pad.Buttons & PSP_CTRL_RIGHT)
+            {
+                printf("Right direction pad pressed! \n");
+            }
+        }
+    }
+
+    return;
 }
 
 //next three functions are required for being able to exit the game with the home button, also taken from example code.
@@ -236,8 +321,6 @@ void netTerm(void)
 
 
 int main(void)  {
-    //SceUID thread_id;
-
     sceUtilityLoadNetModule(PSP_NET_MODULE_COMMON);
 	sceUtilityLoadNetModule(PSP_NET_MODULE_INET);
 
@@ -262,28 +345,11 @@ int main(void)  {
         printf("no IP - dialog cancelled?\n");
 
     
-    connect_to_client();
+    connect_to_client(); //main loop, need to rename and split in to functions
 
     netTerm(); //terminate network connection
 
-    //these might be redundant/deprecated since the whole main thread is set as a user thread? need to look into that
-    /*thread_id = sceKernelCreateThread("net_thread", net_thread, 0x11, 256 * 1024, PSP_THREAD_ATTR_USER, NULL); name, 
-                                                                                                                thread function to actually run, 
-                                                                                                                init priority (?, example says 0x11 is default ),
-                                                                                                                stack size (example says 256kb is regular default),
-                                                                                                                thread atrribute, this means user thread,
-                                                                                                                options, no options*/
-
-    /*if (thread_id < 0) {
-        printf("Error, couldn't create thread.\n");
-        sceKernelSleepThread();
-    }
-
-    sceKernelStartThread(thread_id, 0, NULL); //thread id from create thread, length of arguments in bytes, arguments
-
-    sceKernelExitDeleteThread(0);*/
-
-    sceKernelSleepThread(); //so that the output of the screen stays up after program finishes
+    sceKernelSleepThread(); //so that the output of the screen stays up after program finishes instead of exiting immediately
 
     return 0;
 }
