@@ -9,7 +9,7 @@
 #include <unistd.h>
 #include <poll.h>
 
-#define MAX_MESSAGE_LEN 4096
+#define MAX_MESSAGE_LEN 1024
 #define PFDS_LEN 2
 
 int main () {

@@ -24,7 +24,7 @@
 #define printf pspDebugScreenPrintf
 
 #define MODULE_NAME "PSPChat"
-#define MAX_MESSAGE_LEN 4096
+#define MAX_MESSAGE_LEN 1024
 #define PORT 8080
 #define SERVER_IP "192.168.1.33"
 
@@ -38,7 +38,7 @@ PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER); //sets main thread as a user thread, mig
 //PSP_HEAP_SIZE_KB(-2048);
 //PSP_MAIN_THREAD_STACK_SIZE_KB(1024);
 
-//next three functions are required for being able to exit the game with the home button, also taken from example code.
+//next three functions are required for being able to exit the game with the home button, taken from example code.
 int exit_callback(int arg1, int arg2, void *common) {
     sceKernelExitGame();
     return 0;
@@ -62,22 +62,19 @@ int setup_callbacks(void) {
 int client_fd;
 static int running = 1;
 
-char recv_buf[MAX_MESSAGE_LEN];
+char recv_buf[MAX_MESSAGE_LEN]; //shared buffer so always use semaphore
 
 SceUID semaid;
 
 
 int recv_thread(SceSize args, void *argp) { //thread entries have to be defined like this
-    while (1) {
+    while (running) {
+        char local_buf[MAX_MESSAGE_LEN];
         int conn;
         //char *send_buf_status;
 
-        //printf("> ");
-
-        sceKernelWaitSema(semaid, 1, 0);
-        conn = recv(client_fd, recv_buf, MAX_MESSAGE_LEN - 1, 0);
-        sceKernelSignalSema(semaid, 1);
-
+        conn = recv(client_fd, local_buf, MAX_MESSAGE_LEN - 1, 0);
+        
         if (conn == 0) { 
             printf("Lost connection to the host.\n");
             break;
@@ -86,7 +83,11 @@ int recv_thread(SceSize args, void *argp) { //thread entries have to be defined 
             break;
         }
 
-        recv_buf[conn] = '\0'; //recv doesnt null terminate, so terminate at the number of bytes you received
+        local_buf[conn] = '\0'; //recv doesnt null terminate, so terminate at the number of bytes you received
+
+        sceKernelWaitSema(semaid, 1, 0);
+        memcpy(recv_buf, local_buf, conn + 1);
+        sceKernelSignalSema(semaid, 1);
 
         //printf("%s", recv_buf);
 
@@ -154,7 +155,7 @@ int setup_recv_thread() {
     return thid;
 }
 
-
+//from samples/gu/text example code
 static int fontwidthtab[128] = {
 	10, 10, 10, 10, 
 	10, 10, 10, 10,
@@ -240,6 +241,7 @@ static unsigned int __attribute__((aligned(16))) list[262144];
         sceGuDisplay(GU_TRUE);
 }*/
 
+//from samples/gu/text example code
 /*
 	This function draws a string on the screen
 	The chars are handled as sprites.
@@ -381,6 +383,9 @@ void drawRect(float x, float y, float w, float h) {
 void main_loop(SceUID thid) {
     SceCtrlData pad;
 
+    int frame_count = 0;
+    char frame_string[32];
+
     sceCtrlSetSamplingCycle(0);
     sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
 
@@ -393,6 +398,10 @@ void main_loop(SceUID thid) {
         sceGuClear(GU_COLOR_BUFFER_BIT); //clearing the depth bit seems to remove the rectangle, so only doing the color bit. not sure yet.   
 
         //drawRect(216, 96, 34, 64);
+
+        snprintf(frame_string, sizeof(frame_string), "%d", frame_count);
+
+        drawString(frame_string,   0,  240, 0xFF000000, 0);
 
         sceKernelWaitSema(semaid, 1, 0);
         drawString(recv_buf,   0,  0, 0xFF000000, 0);
@@ -431,14 +440,15 @@ void main_loop(SceUID thid) {
                 screen_color = 0xFF00FF00;
                 //printf("Cross pressed! \n");
             }
-
+            
+            if (pad.Buttons & PSP_CTRL_DOWN)
+            {
+                screen_color = 0xFFFFFFFF;
+                //printf("Down direction pad pressed! \n");
+            }
             /*if (pad.Buttons & PSP_CTRL_UP)
             {
                 printf("Up direction pad pressed! \n");
-            }
-            if (pad.Buttons & PSP_CTRL_DOWN)
-            {
-                printf("Down direction pad pressed! \n");
             }
             if (pad.Buttons & PSP_CTRL_LEFT)
             {
@@ -451,6 +461,8 @@ void main_loop(SceUID thid) {
         }
 
         end_frame();
+
+        frame_count++;
     }
 }
 
@@ -561,6 +573,16 @@ int main(void)  {
     thid = setup_recv_thread();
 
     //strcpy(recv_buf, "Hello Buddy");
+
+    if (thid < 0) {
+        term_gu();
+
+        netTerm(); //terminate network connection
+
+        sceKernelDeleteSema(semaid);
+
+        sceKernelSleepThread();
+    }
 
     main_loop(thid);
 
