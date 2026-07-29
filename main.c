@@ -18,13 +18,15 @@
 #include <pspnet.h>
 #include <math.h>
 #include <pspctrl.h>
+//#include <intraFont.h>
+#include "font.c"
 
 #define printf pspDebugScreenPrintf
 
 #define MODULE_NAME "PSPChat"
 #define MAX_MESSAGE_LEN 4096
 #define PORT 8080
-#define SERVER_IP "192.168.1.41"
+#define SERVER_IP "192.168.1.33"
 
 // PSP_MODULE_INFO is required
 PSP_MODULE_INFO(MODULE_NAME, 0, 1, 0); //name, attributes, major version, minor version
@@ -62,6 +64,9 @@ static int running = 1;
 
 char recv_buf[MAX_MESSAGE_LEN];
 
+SceUID semaid;
+
+
 int recv_thread(SceSize args, void *argp) { //thread entries have to be defined like this
     while (1) {
         int conn;
@@ -69,8 +74,9 @@ int recv_thread(SceSize args, void *argp) { //thread entries have to be defined 
 
         //printf("> ");
 
+        sceKernelWaitSema(semaid, 1, 0);
         conn = recv(client_fd, recv_buf, MAX_MESSAGE_LEN - 1, 0);
-
+        sceKernelSignalSema(semaid, 1);
 
         if (conn == 0) { 
             printf("Lost connection to the host.\n");
@@ -82,7 +88,7 @@ int recv_thread(SceSize args, void *argp) { //thread entries have to be defined 
 
         recv_buf[conn] = '\0'; //recv doesnt null terminate, so terminate at the number of bytes you received
 
-        printf("%s", recv_buf);
+        //printf("%s", recv_buf);
 
     }
 
@@ -149,6 +155,48 @@ int setup_recv_thread() {
 }
 
 
+static int fontwidthtab[128] = {
+	10, 10, 10, 10, 
+	10, 10, 10, 10,
+	10, 10, 10, 10, 
+	10, 10, 10, 10,
+
+	10, 10, 10, 10, 
+	10, 10, 10, 10,
+	10, 10, 10, 10,
+	10, 10, 10, 10,
+
+	10,  6,  8, 10, //   ! " #
+	10, 10, 10,  6, // $ % & '
+	10, 10, 10, 10, // ( ) * +
+	 6, 10,  6, 10, // , - . /
+
+	10, 10, 10, 10, // 0 1 2 3
+	10, 10, 10, 10, // 6 5 8 7
+	10, 10,  6,  6, // 10 9 : ;
+	10, 10, 10, 10, // < = > ?
+
+	16, 10, 10, 10, // @ A B C
+	10, 10, 10, 10, // D E F G
+	10,  6,  8, 10, // H I J K
+	 8, 10, 10, 10, // L M N O
+
+	10, 10, 10, 10, // P Q R S
+	10, 10, 10, 12, // T U V W
+	10, 10, 10, 10, // X Y Z [
+	10, 10,  8, 10, // \ ] ^ _
+
+	 6,  8,  8,  8, // ` a b c
+	 8,  8,  6,  8, // d e f g
+	 8,  6,  6,  8, // h i j k
+	 6, 10,  8,  8, // l m n o
+
+	 8,  8,  8,  8, // p q r s
+	 8,  8,  8, 12, // t u v w
+	 8,  8,  8, 10, // x y z {
+	 8, 10,  8, 12  // | } ~  
+};
+
 //setup for graphics loop
 static unsigned int __attribute__((aligned(16))) list[262144];
 
@@ -192,30 +240,92 @@ static unsigned int __attribute__((aligned(16))) list[262144];
         sceGuDisplay(GU_TRUE);
 }*/
 
-//from rectangle example
+/*
+	This function draws a string on the screen
+	The chars are handled as sprites.
+	It supportes colors and blending.
+	The fontwidth can be selected with the parameter fw, if it is 0 the best width for each char is selected.
+*/
+void drawString(const char* text, int x, int y, unsigned int color, int fw) {
+	int len = (int)strlen(text);
+	if(!len) {
+		return;
+	}
+
+	typedef struct {
+		float s, t;
+		unsigned int c;
+		float x, y, z;
+	} VERT;
+
+	VERT* v = sceGuGetMemory(sizeof(VERT) * 2 * len);
+
+	int i;
+	for(i = 0; i < len; i++) {
+		unsigned char c = (unsigned char)text[i];
+		if(c < 32) {
+			c = 0;
+		} else if(c >= 128) {
+			c = 0;
+		}
+
+		int tx = (c & 0x0F) << 4;
+		int ty = (c & 0xF0);
+
+		VERT* v0 = &v[i*2+0];
+		VERT* v1 = &v[i*2+1];
+		
+		v0->s = (float)(tx + (fw ? ((16 - fw) >> 1) : ((16 - fontwidthtab[c]) >> 1)));
+		v0->t = (float)(ty);
+		v0->c = color;
+		v0->x = (float)(x);
+		v0->y = (float)(y);
+		v0->z = 0.0f;
+
+		v1->s = (float)(tx + 16 - (fw ? ((16 - fw) >> 1) : ((16 - fontwidthtab[c]) >> 1)));
+		v1->t = (float)(ty + 16);
+		v1->c = color;
+		v1->x = (float)(x + (fw ? fw : fontwidthtab[c]));
+		v1->y = (float)(y + 16);
+		v1->z = 0.0f;
+
+		x += (fw ? fw : fontwidthtab[c]);
+	}
+
+	sceGumDrawArray(GU_SPRITES, 
+		GU_TEXTURE_32BITF | GU_COLOR_8888 | GU_VERTEX_32BITF | GU_TRANSFORM_2D,
+		len * 2, 0, v
+	);
+}
+
+
 void setupGu(){
-    sceGuInit();
-
-    //Set up buffers
-    sceGuStart(GU_DIRECT, list);
-    sceGuDrawBuffer(GU_PSM_8888,(void*)0,BUF_WIDTH);
-    sceGuDispBuffer(SCR_WIDTH,SCR_HEIGHT,(void*)0x88000,BUF_WIDTH);
-    sceGuDepthBuffer((void*)0x110000,BUF_WIDTH);
-
-    //Set up viewport
-    sceGuOffset(2048 - (SCR_WIDTH / 2), 2048 - (SCR_HEIGHT / 2));
-    sceGuViewport(2048, 2048, SCR_WIDTH, SCR_HEIGHT);
-    sceGuEnable(GU_SCISSOR_TEST);
-    sceGuScissor(0, 0, SCR_WIDTH, SCR_HEIGHT);
-
-    //Set some stuff
-    sceGuDepthRange(65535, 0); //Use the full buffer for depth testing - buffer is reversed order
-
-    sceGuDepthFunc(GU_GEQUAL); //Depth buffer is reversed, so GEQUAL instead of LEQUAL
-    sceGuEnable(GU_DEPTH_TEST); //Enable depth testing
-
-    sceGuFinish();
-    sceGuDisplay(GU_TRUE);
+	sceGuInit();
+	sceGuStart(GU_DIRECT, list);
+	sceGuDrawBuffer(GU_PSM_8888,(void*)0,BUF_WIDTH);
+	sceGuDispBuffer(SCR_WIDTH,SCR_HEIGHT,(void*)FRAME_SIZE,BUF_WIDTH);
+	sceGuDepthBuffer((void*)(FRAME_SIZE*2),BUF_WIDTH);
+	sceGuOffset(2048 - (SCR_WIDTH/2),2048 - (SCR_HEIGHT/2));
+	sceGuViewport(2048,2048,SCR_WIDTH,SCR_HEIGHT);
+	sceGuDepthRange(0xc350,0x2710);
+	sceGuScissor(0,0,SCR_WIDTH,SCR_HEIGHT);
+	sceGuEnable(GU_SCISSOR_TEST);
+	sceGuDisable(GU_DEPTH_TEST);
+	sceGuShadeModel(GU_SMOOTH);
+	sceGuEnable(GU_BLEND);
+	sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA, 0, 0);
+	sceGuEnable(GU_TEXTURE_2D);
+	sceGuTexMode(GU_PSM_8888, 0, 0, 0);
+	sceGuTexImage(0, 256, 128, 256, font);
+	sceGuTexFunc(GU_TFX_MODULATE, GU_TCC_RGBA);
+	sceGuTexEnvColor(0x0);
+	sceGuTexOffset(0.0f, 0.0f);
+	sceGuTexScale(1.0f / 256.0f, 1.0f / 128.0f);
+	sceGuTexWrap(GU_REPEAT, GU_REPEAT);
+	sceGuTexFilter(GU_NEAREST, GU_NEAREST);
+	sceGuFinish();
+	sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
+	sceGuDisplay(GU_TRUE);
 }
 
 
@@ -268,7 +378,7 @@ void drawRect(float x, float y, float w, float h) {
     sceGuDrawArray(GU_SPRITES, GU_TEXTURE_16BIT | GU_VERTEX_16BIT | GU_TRANSFORM_2D, 2, 0, vertices);
 }
 
-void main_loop() {
+void main_loop(SceUID thid) {
     SceCtrlData pad;
 
     sceCtrlSetSamplingCycle(0);
@@ -282,7 +392,15 @@ void main_loop() {
         sceGuClearColor(screen_color);
         sceGuClear(GU_COLOR_BUFFER_BIT); //clearing the depth bit seems to remove the rectangle, so only doing the color bit. not sure yet.   
 
-        drawRect(216, 96, 34, 64);
+        //drawRect(216, 96, 34, 64);
+
+        sceKernelWaitSema(semaid, 1, 0);
+        drawString(recv_buf,   0,  0, 0xFF000000, 0);
+        sceKernelSignalSema(semaid, 1);
+
+        /*drawString("Hello World in red",   0,  0, 0xFF0000FF, 0);
+		drawString("Hello World in green", 0, 16, 0xFF00FF00, 0);
+		drawString("Hello World in blue",  0, 32, 0xFFFF0000, 0);*/
 
         //pspDebugScreenSetXY(0, 2);
         sceCtrlReadBufferPositive(&pad, 1);
@@ -295,11 +413,12 @@ void main_loop() {
         {
             if (pad.Buttons & PSP_CTRL_CIRCLE) {
                 //printf("Circle pressed! Exiting. \n");
-                //close(client_fd);
-                //sceKernelWaitThreadEnd(thid, NULL);
+                close(client_fd);
+                sceKernelWaitThreadEnd(thid, NULL);
                 break;
             }
             if (pad.Buttons & PSP_CTRL_SQUARE) {
+                //strcpy(recv_buf, "Goodbye Buddy");
                 screen_color = 0xFFFF0000;
                 //printf("Square pressed! \n");
             }
@@ -423,30 +542,33 @@ void print_ip() {
 
 int main(void)  {
     SceUID thid;
+
+    semaid = sceKernelCreateSema("MyMutex", 0, 1, 1, 0);
+
     sceUtilityLoadNetModule(PSP_NET_MODULE_COMMON);
 	sceUtilityLoadNetModule(PSP_NET_MODULE_INET);
 
-    //netInit();
+    netInit();
 
     setup_callbacks();
     
     setupGu();
 
-    //netDialog();
-
-    //both required for shutting down graphics, only so we can display debug screen for now
-    //sceGuDisplay(GU_FALSE);
-    //sceGuTerm();
+    netDialog();
 
     //pspDebugScreenInit();
     
-    //thid = setup_recv_thread();
+    thid = setup_recv_thread();
 
-    main_loop();
+    //strcpy(recv_buf, "Hello Buddy");
+
+    main_loop(thid);
 
     term_gu();
 
-    //netTerm(); //terminate network connection
+    netTerm(); //terminate network connection
+
+    sceKernelDeleteSema(semaid);
 
     sceKernelSleepThread(); //so that the output of the screen stays up after program finishes instead of exiting immediately
 

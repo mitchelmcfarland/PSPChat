@@ -24,7 +24,7 @@
 #define MODULE_NAME "PSPChat"
 #define MAX_MESSAGE_LEN 4096
 #define PORT 8080
-#define SERVER_IP "192.168.1.41"
+#define SERVER_IP "192.168.1.33"
 
 // PSP_MODULE_INFO is required
 PSP_MODULE_INFO(MODULE_NAME, 0, 1, 0); //name, attributes, major version, minor version
